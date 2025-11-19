@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Data retrieval - local GetHistoryFunction
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 900
+    MemorySize: 1024
+    Architectures:
+      - x86_64
+
+Resources:
+  GetHistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: get_history/
+      Handler: app.lambda_handler
+      Description: One-time backfill of last 10 years of stock data (placeholder)
+      Environment:
+        Variables:
+          ENVIRONMENT: local
+          TWELVE_DATA_API_KEY: ""   # declared here, value overridden by env.json
+
+Outputs:
+  GetHistoryFunctionName:
+    Description: Name of the GetHistory Lambda function
+    Value: !Ref GetHistoryFunction

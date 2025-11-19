@@ -1,0 +1,45 @@
+core:
+  ohlcv: [open, high, low, close, volume]
+  derived:
+    - daily_return
+    - rolling_volatility_5d
+    - rolling_volatility_20d
+    - price_gap
+    - volume_zscore
+
+technicals:
+  sma:
+    periods: [5, 10, 20]
+  ema:
+    periods: [20, 50]
+  rsi:
+    periods: [14]
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  stochastic_oscillator: {}
+  atr:
+    period: 14
+  bollinger_bands:
+    period: 20
+    stddev: 2
+  obv: {}
+  mfi: {}
+  adx:
+    period: 14
+  cci:
+    period: 20
+
+fundamentals:
+  fundamentals:
+    - pe_ratio
+    - eps
+    - book_value
+    - dividend_yield
+    - beta
+  earnings_calendar:
+    - next_earnings_date
+    - days_to_earnings
+  earnings:
+    - earnings_surprise_last_q

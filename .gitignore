@@ -8,6 +8,7 @@ __pycache__/
 *.pyd
 .env
 .env.*
+env.json
 *.log
 
 # SAM / Lambda builds

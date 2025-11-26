@@ -1,12 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Data retrieval - local GetHistoryFunction
+Description: Data Retrieval - GetHistoryFunction (10-year OHLCV backfill)
 
 Globals:
   Function:
     Runtime: python3.11
-    Timeout: 900
-    MemorySize: 1024
+    Timeout: 900          # 15 minutes, needed for large backfills
+    MemorySize: 1024      # gives more network bandwidth + concurrency
     Architectures:
       - x86_64
 
@@ -16,11 +16,16 @@ Resources:
     Properties:
       CodeUri: get_history/
       Handler: app.lambda_handler
-      Description: One-time backfill of last 10 years of stock data (placeholder)
+      Description: >
+        One-time backfill of the last 10 years of OHLCV data
+        for all tickers in tickers.txt.
       Environment:
         Variables:
           ENVIRONMENT: local
-          TWELVE_DATA_API_KEY: ""   # declared here, value overridden by env.json
+          EODHD_API_TOKEN: ""     # value overridden by env.json during local invoke
+          MAX_WORKERS: "8"        # adjustable in env.json or Lambda console
+      Policies:
+        - AWSLambdaBasicExecutionRole    # basic logging permissions
 
 Outputs:
   GetHistoryFunctionName:

@@ -1,7 +1,9 @@
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import requests
@@ -12,6 +14,9 @@ load_dotenv()
 
 BASE_URL = "https://eodhd.com/api"
 REQUEST_TIMEOUT = 30
+
+# Global session for connection reuse (helps in Lambda warm starts too)
+SESSION = requests.Session()
 
 
 def _load_tickers() -> list[str]:
@@ -41,9 +46,16 @@ def _coerce_float(value):
         return None
 
 
-def _fetch_eod_for_symbol(symbol: str, start_date: str, end_date: str, api_token: str) -> list[dict]:
+def _fetch_eod_for_symbol(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    api_token: str,
+    session: Optional[requests.Session] = None,
+) -> list[dict]:
     """
     Call EODHD /eod for a single symbol and return parsed OHLCV rows.
+    Uses a shared requests.Session if provided for connection reuse.
     """
     url = f"{BASE_URL}/eod/{symbol}.US"
     params = {
@@ -56,7 +68,8 @@ def _fetch_eod_for_symbol(symbol: str, start_date: str, end_date: str, api_token
         "limit": 5000,
     }
 
-    resp = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
+    http = session or requests  # Session and module both have .get()
+    resp = http.get(url, params=params, timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
     try:
         data = resp.json()
@@ -76,7 +89,7 @@ def _fetch_eod_for_symbol(symbol: str, start_date: str, end_date: str, api_token
             data = data["data"]
 
     if not isinstance(data, list):
-        raise RuntimeError(f"Unexpected response format for {symbol}")
+        raise RuntimeError(f"Unexpected response format for {symbol}: {data!r}")
 
     rows: list[dict] = []
     for entry in data:
@@ -123,21 +136,54 @@ def write_monthly_parquet(rows: list[dict], output_dir: Path) -> list[str]:
 
 
 def run_pipeline(api_token: str, output_dir: Path) -> dict:
+    """
+    Fetch 10y of OHLCV for all tickers in tickers.txt in parallel
+    and write monthly Parquet files into output_dir.
+    """
     start_date, end_date = _ten_year_window()
     tickers = _load_tickers()
 
     rows: list[dict] = []
     errors: list[dict] = []
 
-    for sym in tickers:
-        try:
-            rows.extend(_fetch_eod_for_symbol(sym, start_date, end_date, api_token))
-        except Exception as exc:
-            errors.append({"symbol": sym, "error": str(exc)})
+    # Allow tuning concurrency via env, default=8
+    max_workers_env = os.environ.get("MAX_WORKERS", "8")
+    try:
+        max_workers = max(1, int(max_workers_env))
+    except ValueError:
+        max_workers = 8
+
+    print(
+        f"Running pipeline for {len(tickers)} tickers "
+        f"from {start_date} to {end_date} with max_workers={max_workers}"
+    )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_symbol = {
+            executor.submit(
+                _fetch_eod_for_symbol,
+                sym,
+                start_date,
+                end_date,
+                api_token,
+                SESSION,
+            ): sym
+            for sym in tickers
+        }
+
+        for i, future in enumerate(as_completed(future_to_symbol), start=1):
+            sym = future_to_symbol[future]
+            try:
+                symbol_rows = future.result()
+                rows.extend(symbol_rows)
+                print(f"[{i}/{len(tickers)}] Fetched {len(symbol_rows)} rows for {sym}")
+            except Exception as exc:
+                print(f"[{i}/{len(tickers)}] Error for {sym}: {exc}")
+                errors.append({"symbol": sym, "error": str(exc)})
 
     files = write_monthly_parquet(rows, output_dir)
 
-    return {
+    summary = {
         "start_date": start_date,
         "end_date": end_date,
         "tickers_count": len(tickers),
@@ -147,6 +193,9 @@ def run_pipeline(api_token: str, output_dir: Path) -> dict:
         "min_date": min((r["date"] for r in rows), default=None),
         "max_date": max((r["date"] for r in rows), default=None),
     }
+
+    print("Pipeline summary:", json.dumps(summary, indent=2))
+    return summary
 
 
 def lambda_handler(event, context):

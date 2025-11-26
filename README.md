@@ -1,61 +1,101 @@
-# The GetHistoryFunction retrieves 10 years of daily stock data per ticker and produces one CSV file per symbol with:
-- OHLCV data
-- Derived features (daily return, rolling vol, price gap, volume z-score)
-- Technical indicators from Twelve Data (RSI, SMA/EMA, MACD, ATR, Bollinger Bands, ADX, CCI, etc.)
+# Data Retrieval Pipeline (EODHD / AWS Lambda)
 
-All features are controlled through get_history/features.yml.
+This project fetches 10 years of daily OHLCV equity data from EODHD for a list of U.S. tickers and stores the results as monthly Parquet files.
+It includes a one-time historical backfill Lambda function and supports local development with AWS SAM.
 
-## Output
-- python app.py → CSVs written to ./output
-- sam local invoke → CSVs written to /tmp/output (inside container)
+⸻
 
-Missing values are currently left as None (no imputation yet).
+## 🚀 Features
+- Fetches 10 years of historical daily OHLCV data
+- Reads tickers from get_history/tickers.txt
+- Parallel API requests using ThreadPoolExecutor
+- Writes Parquet files as YYYY-MM.parquet
+- Runs locally or inside AWS Lambda (GetHistoryFunction)
+- Local Lambda simulation with AWS SAM
 
----
+⸻
 
-## ⚠️ Things Still To Be Decided
-- Final feature list
-- How we handle missing values
-- S3 storage structure
-- Daily update flow (appending vs overwriting)
-- Twelve Data rate limits (free tier cannot support multiple tickers due to many indicator calls)
-
----
-
-## 🧠 How It Works (Short)
-
-For each ticker:
-1. Fetch OHLCV (/time_series, one call)
-2. Fetch indicators (multiple API calls, one per indicator)
-3. Compute derived features in Python
-4. Merge everything into one table
-5. Write a single CSV per symbol
-
-Because each indicator requires a separate endpoint, it isn’t possible to fetch all features in one API call.
-
----
-
-## 🚀 Running the Code
-
-### A) Local
-```bash
-export TWELVE_DATA_API_KEY="your_key"
-python3 get_history/app.py
+## 🧱 Project Structure
 ```
-Output CSVs appear in:
-`./output`
-
-### B) SAM Lambda Simulation
-```bash
-sam build
-sam local invoke --env-vars env.json GetHistoryFunction
+data-retrieval/
+│
+├── get_history/
+│   ├── app.py              # Main pipeline (10-year backfill)
+│   ├── tickers.txt         # List of tickers
+│
+├── output/                 # Local Parquet output (created at runtime)
+│
+├── template.yaml           # SAM template (Lambda definition)
+├── env.json                # Local SAM env vars
+├── requirements.txt        # Python dependencies
+└── README.md
 ```
-Uses `/tmp/output` inside the container.
-env.json must include your key:
-```json
+
+## 🔑 Environment Variables
+| Variable | Purpose |
+| --- | --- |
+| EODHD_API_TOKEN | EODHD API key |
+| MAX_WORKERS | Parallel request count (default 8) |
+
+.env (for local Python runs)
+```
+EODHD_API_TOKEN=YOUR_KEY
+MAX_WORKERS=8
+```
+
+## Local Testing (Simple Python Run)
+From the repo root:
+```
+cd get_history
+python3 app.py
+```
+- Loads .env
+- Fetches 10-year OHLCV for all tickers
+- Writes Parquet files into ../output/
+
+⸻
+
+## 🧪 Local Testing with AWS SAM (Lambda Simulation)
+
+1. env.json
+```
 {
   "GetHistoryFunction": {
-    "TWELVE_DATA_API_KEY": "YOUR_KEY"
+    "EODHD_API_TOKEN": "YOUR_KEY",
+    "MAX_WORKERS": "8"
   }
 }
 ```
+2. event.json
+```
+{}
+```
+3. Build the project
+```
+sam build --use-container
+```
+4. Invoke the Lambda locally
+```
+sam local invoke GetHistoryFunction \
+  --event event.json \
+  --env-vars env.json
+```
+The Lambda writes its Parquet output to /tmp/output inside the container.
+
+⸻
+
+## 📦 Deploy to AWS
+
+Deploy using:
+```
+sam deploy --guided
+```
+This uploads and provisions the GetHistoryFunction Lambda in your AWS account.
+Later you can extend the project to write Parquet files directly to S3.
+
+⸻
+
+## 📝 Notes
+- Heavy dependencies (pandas, pyarrow, numpy) require using
+sam build --use-container to match the Lambda environment.
+- Output is organized by YYYY-MM for efficient downstream processing.
